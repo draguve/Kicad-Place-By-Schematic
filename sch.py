@@ -3,6 +3,7 @@
 import sys
 import shlex
 import re
+from pathlib import Path
 
 
 def ensure_quoted(s):
@@ -109,7 +110,7 @@ class Sheet(object):
 
     _KEYS = {'S': _S_KEYS, 'U': _U_KEYS, 'F': _F_KEYS}
 
-    def __init__(self, data):
+    def __init__(self, data,parent_filename):
         self.shape = {}
         self.unit = {}
         self.fields = []
@@ -131,7 +132,15 @@ class Sheet(object):
             elif line[0][0] == 'F':
                 key_list = self._F_KEYS
                 values = line + ['' for n in range(len(key_list) - len(line))]
-                self.fields.append(dict(zip(key_list, values)))
+                to_append = dict(zip(key_list, values))
+                if(to_append["id"]=="F1"):
+                    self.filename = to_append['value'][1:-1]
+                self.fields.append(to_append)
+        
+        p = Path(parent_filename)
+        self.path = p.parent.joinpath(self.filename)
+        if(self.path.exists):
+            self.sch = Schematic(self.path)
 
 
 class Bitmap(object):
@@ -214,7 +223,7 @@ class Schematic(object):
                     if line.startswith('$EndComp'):
                         self.components.append(Component(block_data))
                     if line.startswith('$EndSheet'):
-                        self.sheets.append(Sheet(block_data))
+                        self.sheets.append(Sheet(block_data,filename))
                     if line.startswith('$EndBitmap'):
                         self.bitmaps.append(Bitmap(block_data))
 
