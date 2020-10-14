@@ -5,6 +5,23 @@ import shlex
 import re
 from pathlib import Path
 
+trans_p = re.compile('\t([\-0-9]+)\s+([\-0-9]+)\s+([\-0-9]+)\s+([\-0-9]+)')
+t0  = '	1    0    0    -1'
+t0f  = '	1    0    0    1'
+t180 = '	-1   0    0    1'
+t180f = '	-1   0    0    -1' # this is flipped horizontally
+tM90 = '	0    1    1    0'
+t90  = '	0    -1   -1   0'
+tunk  = '	0    1   -1   0'
+orientations = {
+    str(trans_p.match(t0).groups()): 0,
+    str(trans_p.match(t0f).groups()): 0, # TWS added to handle flipped, but no rotation
+    str(trans_p.match(t180).groups()): 180,
+    str(trans_p.match(t180f).groups()): 180,
+    str(trans_p.match(tM90).groups()): -90,
+    str(trans_p.match(t90).groups()): 90,
+    str(trans_p.match(tunk).groups()) : 0
+}
 
 def ensure_quoted(s):
     """
@@ -76,6 +93,8 @@ class Component(object):
                 self.references.append(dict(zip(key_list, values)))
             elif line[0] == 'F':
                 self.fields.append(dict(zip(key_list, values)))
+        trans = trans_p.match(self.old_stuff[1])
+        self.orient = orientations[str(trans.groups())]
 
     # TODO: enhancements
     # * 'value' could be used instead of 'ref'
@@ -227,112 +246,24 @@ class Schematic(object):
                     if line.startswith('$EndBitmap'):
                         self.bitmaps.append(Bitmap(block_data))
 
-    def save(self, filename=None):
-        # check whether it has header, what means that sch file was loaded fine
-        if not self.header:
-            return
+def get_all_components(sheets):
+    all_components = []
+    for sheet in sheets:
+        if sheet.sch:
+            all_components.extend(sheet.sch.components)
 
-        if not filename:
-            filename = self.filename
+            if sheet.sch.sheets:
+                all_components.extend(get_all_components(sheet.sch.sheets))
+    return all_components
 
-        # insert the header
-        to_write = []
-        to_write += [self.header]
 
-        # LIBS
-        to_write += self.libs
+def get_locations(filename):
+    top = Schematic(filename)
+    all_comps = top.components
+    all_comps.extend(get_all_components(top.sheets))
 
-        # EELAYER
-        to_write += [self.eelayer, 'EELAYER END\n']
-
-        # Description
-        to_write += self.description.raw_data
-
-        # Sheets
-        for sheet in self.sheets:
-            to_write += ['$Sheet\n']
-            if sheet.shape:
-                line = 'S '
-                for key in sheet._S_KEYS:
-                    line += sheet.shape[key] + ' '
-                to_write += [line.rstrip() + '\n']
-            if sheet.unit:
-                line = 'U '
-                for key in sheet._U_KEYS:
-                    line += sheet.unit[key] + ' '
-                to_write += [line.rstrip() + '\n']
-
-            for field in sheet.fields:
-                line = ''
-                for key in sheet._F_KEYS:
-                    line += field[key] + ' '
-                to_write += [line.rstrip() + '\n']
-            to_write += ['$EndSheet\n']
-
-        # Components
-        for component in self.components:
-            to_write += ['$Comp\n']
-            if component.labels:
-                line = 'L '
-                for key in component._L_KEYS:
-                    line += component.labels[key] + ' '
-                to_write += [line.rstrip() + '\n']
-
-            if component.unit:
-                line = 'U '
-                for key in component._U_KEYS:
-                    line += component.unit[key] + ' '
-                to_write += [line.rstrip() + '\n']
-
-            if component.position:
-                line = 'P '
-                for key in component._P_KEYS:
-                    line += component.position[key] + ' '
-                to_write += [line.rstrip() + '\n']
-
-            for reference in component.references:
-                if component.references:
-                    line = 'AR '
-                    for key in component._AR_KEYS:
-                        line += reference[key] + ' '
-                    to_write += [line.rstrip() + '\n']
-
-            for field in component.fields:
-                line = 'F '
-                for key in component._F_KEYS:
-                    line += field[key] + ' '
-                to_write += [line.rstrip() + '\n']
-
-            if component.old_stuff:
-                to_write += component.old_stuff
-
-            to_write += ['$EndComp\n']
-
-        # Bitmaps
-        for bitmap in self.bitmaps:
-            to_write += bitmap.raw_data
-
-        # Texts
-        for text in self.texts:
-            to_write += [text['desc'], text['data']]
-
-        # Wires
-        for wire in self.wires:
-            to_write += [wire['desc'], wire['data']]
-
-        # Entries
-        for entry in self.entries:
-            to_write += [entry['desc'], entry['data']]
-
-        # Connections
-        for conn in self.conns:
-            to_write += [conn['desc']]
-
-        # No Connetions
-        for noconn in self.noconns:
-            to_write += [noconn['desc']]
-
-        to_write += ['$EndSCHEMATC\n']
-
-        f = open(filename, 'w')
-        f.writelines(to_write)
+    locs = {}
+    for comp in all_comps:
+        item = { "pos":comp.position , "comp":comp , "degree":comp.orient}
+        locs[comp.labels["ref"]] = item
+    return locs
